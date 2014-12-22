@@ -68,6 +68,7 @@
     <ClCompile Include="Structure.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="MDM.h" />
     <ClInclude Include="Structure.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
