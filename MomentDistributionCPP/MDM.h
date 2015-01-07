@@ -7,4 +7,5 @@
 using namespace std;
 
 int main(int argc, char** argv);
-Structure problem1();
+Structure* problem1();
+Structure* problem2();
