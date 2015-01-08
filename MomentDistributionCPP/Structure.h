@@ -2,7 +2,6 @@
 #include <iostream>
 #include <string>
 #include <thread>
-#include <atomic> 
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
@@ -10,9 +9,11 @@
 #include <locale> 
 #include <map>
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
 
+//tolerance of the maximum unbalanced moment
 const double TOLERANCE = 0.0001;
 
 class Joint;
@@ -22,44 +23,50 @@ class Member;
 
 class Structure {
 public:
-	Structure();
-	~Structure();
+	Structure() {};
+	~Structure() {};
+
 	void add_joint(Joint* joint);
-	string to_string();
+	void make_member(End* end1, End* end2);
+	double get_max_unbalanced_moment();
+
 	void analyze_sequential_Jacobi();
 	void analyze_sequential_Gauss_Seidel();
 	void analyze_parallel();
 	void analyze_manual();
+	void analyze_schedule(vector<string> & schedule);
+
 	void print();
-	void make_member(End* end1, End* end2);
-	double get_max_unbalanced_moment();
+	
 	bool finish = false;
 private:
-	map<string, Joint*> joints;
 	void analyze_joint_thread(Joint* joint);
 	void monitor();
-	void analyze_schedule(vector<string> & schedule);
+	string to_string();
+
+	map<string, Joint*> joints;
 };
 
 class Joint {
 public:
-	string name;
-	bool is_fixed;
-	Structure* s;
-
-	mutex mtx;
-	condition_variable cvj;
-
 	Joint(string name, bool is_fixed, Structure* s);
 	void add_end(End* end);
+
+	double get_unbalanced_moment();
 	bool release_par();
 	bool release_schedule_1();
 	bool release_schedule_2();
-	double get_unbalanced_moment();
+	
 	string to_string();
+
+	string name;
+	bool is_fixed;
+	condition_variable cvj;
 private:
+	Structure* s;
 	vector<End*> ends;
 	double unbalancedMoment = 0.0;
+	mutex mtx;
 };
 
 class End {

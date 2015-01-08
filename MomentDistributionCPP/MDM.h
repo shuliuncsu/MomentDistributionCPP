@@ -1,7 +1,7 @@
+#pragma once
 #include <cstdlib>
 #include <iostream>
 #include <string>
-#include <thread>
 #include "Structure.h"
 
 using namespace std;

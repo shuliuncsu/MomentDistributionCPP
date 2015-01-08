@@ -1,12 +1,15 @@
 #include "MDM.h"
 
+//Hardy Cross Method of Moment Distribution
 int main(int argc, char** argv) {
-	cout << "***************************************" << endl;
-	cout << "*   Hardy Cross Moment Distribution   *" << endl;
-	cout << "***************************************" << endl << endl;
+	cout << "*************************************************" << endl;
+	cout << "*   Hardy Cross Method of Moment Distribution   *" << endl;
+	cout << "*************************************************" << endl;
 
+	//Repeatly prompt user to choose actions
 	while (true) {
-		cout << "Please enter problem index (1 or 2) (0 to exit): ";
+		//choose which example problem to be analyzied
+		cout  << endl << "Please enter problem index (1 or 2) (0 to exit): ";
 		int index;
 		auto problem = problem1;
 		cin >> index;
@@ -22,21 +25,21 @@ int main(int argc, char** argv) {
 			break;
 		}
 
+		//print structure before analysis
 		Structure* s;
 		s = problem();
 		s->print();
 
+		//choose analysis type
 		cout << endl <<  "Please enter analysis type (1: sequential - Jacobi, 2: sequential - Gauss-Seidel, 3: parallel, 4: manual): ";
 		int type;
 		cin >> type;
 		switch (type) {
 		case 1:
 			s->analyze_sequential_Jacobi();
-			//s->print();
 			break;
 		case 2:
 			s->analyze_sequential_Gauss_Seidel();
-			//s->print();
 			break;
 		case 3:
 			s->analyze_parallel();
@@ -48,13 +51,10 @@ int main(int argc, char** argv) {
 		}
 
 	}
-	//cin.ignore();
-	//string temp;
-	//cin >> temp;
 	return 0;
 }
 
-
+//example problem 1
 Structure* problem1() {
 	Structure* s = new Structure();
 
@@ -76,6 +76,7 @@ Structure* problem1() {
 	return s;
 }
 
+//example problem 2
 Structure* problem2() {
 	Structure* s = new Structure();
 
