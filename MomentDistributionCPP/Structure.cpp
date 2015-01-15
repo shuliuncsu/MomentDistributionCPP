@@ -27,10 +27,12 @@ double Structure::get_max_unbalanced_moment() {
 void Structure::analyze_sequential_Jacobi() {
 	int count = 0;
 	vector<string> schedule;
+	//add all joints to schedule
 	for (auto pair : joints) {
 		if (!pair.second->is_fixed)
 			schedule.push_back(pair.first);
 	}
+	//perform iterations using same schedule
 	while (get_max_unbalanced_moment() > TOLERANCE) {
 		cout << endl << "Iteration " << ++count << ":" << endl;
 		analyze_schedule(schedule);
@@ -45,25 +47,46 @@ void Structure::analyze_sequential_Gauss_Seidel() {
 		for (auto pair : joints) {
 			if (!pair.second->is_fixed && get_max_unbalanced_moment() > TOLERANCE) {
 				schedule.clear();
+				//add one joint to schedule
 				schedule.push_back(pair.first);
 				cout << endl << "Iteration " << ++count << ":" << endl;
+				//perform iteration
 				analyze_schedule(schedule);
 			}
 		}
 	}
 }
 
-//apply Hardy Cross Moment Distribution Method on the structure using parallel schedule
+//apply Hardy Cross Moment Distribution Method on the structure using asynchronous parallel schedule
 void Structure::analyze_parallel() {
+	//connect joints as ring
+	//initialize joint color and token for Dijkstra ring based termination algorithm
+	Joint* temp = NULL;
+	Joint* first = NULL;
+	for (auto pair : joints) {
+		if (!temp) {
+			temp = first = pair.second;
+			first->is_initializer = true;
+			first->set_token(Token::black);
+		}
+		else {
+			pair.second->next_joint = temp;
+			pair.second->is_initializer = false;
+			pair.second->set_token(Token::none);
+			temp = pair.second;
+		}
+	}
+	first->next_joint = temp;
+	finish = false;
+
+	//create thread pool
 	vector<thread> pool;
 	for (auto pair : joints) {
 		Joint* joint = pair.second;
-		if (!joint->is_fixed)
-			pool.push_back(thread(&Structure::analyze_joint_thread, this, joint));
+		pool.push_back(thread(&Structure::analyze_joint_thread_Dijkstra, this, joint));
 	}
-	thread master(&Structure::monitor, this);
 
-	master.join();
+	//join threads
 	for (auto& t : pool) {
 		t.join();
 	}
@@ -72,42 +95,39 @@ void Structure::analyze_parallel() {
 //apply Hardy Cross Moment Distribution Method on the structure using manual schedule
 void Structure::analyze_manual() {
 	int count = 0;
-
-	cout << endl << "Enter joints to be released [ ";
-	for (auto pair : joints) {
-		cout << pair.first << " ";
-	}
-	cout << "] (separate by comma, e.g. A,B): ";
-
 	string line;
 	vector<string> schedule;
-	cin >> line;
 
-	while (line != "0") {
-		for (size_t i = 0; i < line.length(); ++i)
-			line[i] = toupper(line[i]);
-
-		int prev = 0;
-		for (size_t i = 0; i <= line.size(); i++) {
-			if (i == line.size() || line[i] == ',') {
-				if (prev != i) {
-					schedule.push_back(line.substr(prev, i - prev));
-				}
-				prev = i + 1;
-			}
-		}
-
-		cout << endl << "Iteration " << ++count << ":" << endl;
-		analyze_schedule(schedule);
-
+	do {
 		schedule.clear();
+		//prompt user input
 		cout << endl << "Enter joints to be released [ ";
 		for (auto pair : joints) {
 			cout << pair.first << " ";
 		}
-		cout << "] (separate by comma, e.g. A,B): ";
+		cout << "] (separate by comma, e.g. A,B) (0 to exit): ";
 		cin >> line;
-	}
+
+		if (line != "0") {
+			for (size_t i = 0; i < line.length(); ++i)
+				line[i] = toupper(line[i]);
+
+			//prepare schedule based on user input
+			int prev = 0;
+			for (size_t i = 0; i <= line.size(); i++) {
+				if (i == line.size() || line[i] == ',') {
+					if (prev != i) {
+						schedule.push_back(line.substr(prev, i - prev));
+					}
+					prev = i + 1;
+				}
+			}
+
+			//perform analyze using user input schedule
+			cout << endl << "Iteration " << ++count << ":" << endl;
+			analyze_schedule(schedule);
+		}
+	} while (line != "0");
 }
 
 //apply one step of Hardy Cross Moment Distribution Method on the structure using a particular schedule
@@ -115,6 +135,7 @@ void Structure::analyze_schedule(vector<string> & schedule) {
 	cout << "Releasing Joint:";
 	for (auto s : schedule) {
 		if (joints.find(s) != joints.end()) {
+			//calculate unbalanced moment
 			joints[s]->release_schedule_1();
 			cout << " " << s;
 		}
@@ -124,6 +145,7 @@ void Structure::analyze_schedule(vector<string> & schedule) {
 	}
 	for (auto s : schedule) {
 		if (joints.find(s) != joints.end()) {
+			//distribute unbalanced moment
 			joints[s]->release_schedule_2();
 		}
 	}
@@ -140,22 +162,13 @@ void Structure::print() {
 }
 
 //helper analysis function for a worker thread of a joint
-void Structure::analyze_joint_thread(Joint* joint) {
-	for (int i = 0; i < 1000 && !finish; ++i){
-		joint->release_par();
-		cout << joint->name;
-		//this_thread::yield();
+void Structure::analyze_joint_thread_Dijkstra(Joint* joint) {
+	while (!finish) {
+		//repeat analysis until converge
+		joint->release_parallel_Dijkstra();
 	}
-}
-
-//master thread in parallel analysis
-void Structure::monitor() {
-	this_thread::sleep_for(std::chrono::seconds(1));
-	finish = true;
-	for (auto pair : joints) {
-		Joint* joint = pair.second;
-		joint->cvj.notify_all();
-	}
+	cout << joint->name << " terminate" << endl;
+	joint->next_joint->cvj.notify_all();
 }
 
 //get a string representation of the structure
@@ -186,47 +199,97 @@ double Joint::get_unbalanced_moment() {
 	return result;
 }
 
-//release a joint, used in parallel analysis only
-bool Joint::release_par() {
-	if (is_fixed) {
-		return true;
-	}
-	double unbalancedMoment = 0.0;
-	for (End* end : ends) {
-		unbalancedMoment += end->get_moment();
-	}
-	if (abs(unbalancedMoment) > TOLERANCE) {
+//release a joint, change color and pass token based on Dijkstra ring based termination algorithm
+//used in parallel analysis only
+void Joint::release_parallel_Dijkstra() {
+	unique_lock<mutex> lck(mtx);
+
+	if (!release_schedule_1()) {
+		//active thread
+		release_schedule_2();
 		for (End* end : ends) {
-			end->distribute(unbalancedMoment);
+			//rule 1
+			is_white = false;
+			//notify other threads
 			end->far_end->joint->cvj.notify_all();
 		}
-		return false;
 	}
 	else {
-		unique_lock<mutex> lck(mtx);
-		cvj.wait(lck);
-		return true;
+		//passive thread
+		while (!token_lock.try_lock()) {
+			cvj.wait(lck);
+		}
+		if (is_initializer) {
+			if (token == Token::black) {
+				cout << "Joint " << name << " reveive black token, unsuccessful" << endl;
+				//unsuccessful, initialize another white oken
+				//rule 3, 4
+				token = Token::none;
+				is_white = true;
+				cout << "Joint " << name << " sent white token" << endl;
+				next_joint->set_token(Token::white);
+
+				cvj.wait(lck);
+			}
+			else if (token == Token::white) {
+				cout << "Joint " << name << " reveive white token, successful" << endl;
+				//successful, terminate
+				//rule 3
+				s->finish = true;
+				next_joint->cvj.notify_all();
+			}
+			else {
+				cout << "No token at joint " << name << endl;
+
+				cvj.wait(lck);
+			}
+		}
+		else{
+			//rule 0
+			if (token != Token::none) {
+				cout << "Joint " << name << " reveive " << (token == Token::white ? "white" : "black") << " token" << endl;
+				//rule 2
+				Token token_to_be_send = is_white ? token : Token::black;
+				//rule 5
+				token = Token::none;
+				is_white = true;
+
+				cout << "Joint " << name << " sent " << (token_to_be_send == Token::white ? "white" : "black") << " token" << endl;
+				next_joint->set_token(token_to_be_send);
+			}
+			else {
+				cout << "No token at joint " << name << endl;
+			}
+
+			cvj.wait(lck);
+		}
+		token_lock.unlock();
 	}
+}
+
+//set token for a joint, then notify this joint
+void Joint::set_token(Token token) {
+	while (!token_lock.try_lock()) {
+		cvj.notify_all();
+	}
+	this->token = token;
+	cvj.notify_all();
+	token_lock.unlock();
 }
 
 //prepare releasing a joint by calculating and recording its unbalanced moment 
 bool Joint::release_schedule_1() {
 	if (is_fixed) return true;
-	unbalancedMoment = get_unbalanced_moment();
-	return abs(unbalancedMoment) <= TOLERANCE;
+	unbalanced_moment = get_unbalanced_moment();
+	return abs(unbalanced_moment) <= TOLERANCE;
 }
 
 //complete releasing a joint by redistributing its unbalanced moment 
-bool Joint::release_schedule_2() {
-	if (is_fixed) return true;
-	if (abs(unbalancedMoment) > TOLERANCE) {
+void Joint::release_schedule_2() {
+	if (!is_fixed && abs(unbalanced_moment) > TOLERANCE) {
 		for (End* end : ends) {
-			end->distribute(unbalancedMoment);
+			end->distribute(unbalanced_moment);
 		}
-		return false;
-	}
-	else {
-		return true;
 	}
 }
 
@@ -242,8 +305,8 @@ string Joint::to_string() {
 //--------------End Class Functions---------------
 
 //constructor
-End::End(Joint* joint, double df, double cf, double m)
-	: joint(joint), name(joint->name), far_end(NULL), df(df), cf(cf), moment(m) {
+End::End(Joint* joint, double distribution_factor, double carryover_factor, double m)
+	: joint(joint), name(joint->name), far_end(NULL), distribution_factor(distribution_factor), carryover_factor(carryover_factor), moment(m) {
 	joint->add_end(this);
 }
 
@@ -259,14 +322,14 @@ double End::get_moment() {
 }
 
 //distribute the unbalanced moment and calculate carryover moment
-void End::distribute(double unbalancedMoment) {
-	decr_moment(unbalancedMoment * df);
-	far_end->decr_moment(unbalancedMoment * df * cf);
+void End::distribute(double unbalanced_moment) {
+	decr_moment(unbalanced_moment * distribution_factor); //mimic matrix D
+	far_end->decr_moment(unbalanced_moment * distribution_factor * carryover_factor); //mimic matrix CD
 }
 
 //change the moment of this end, this calculation is thread safe
 void End::decr_moment(double moment) {
-	lock.lock();
+	while (!lock.try_lock());
 	this->moment -= moment;
 	lock.unlock();
 }
